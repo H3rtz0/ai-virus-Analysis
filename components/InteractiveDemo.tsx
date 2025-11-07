@@ -52,11 +52,9 @@ const InteractiveDemo: React.FC = () => {
       const formattedReport = virusTotalService.formatVirusTotalReport(vtResponse);
       setReport(formattedReport);
     } catch (err) {
-      if (err instanceof Error && (err.message.includes('Failed to fetch') || err.message.includes('CORS'))) {
-          setError(`获取报告失败，这很可能是由浏览器的 CORS 安全策略导致的。这是一个标准的安全措施，而非应用本身的错误。要在本地测试此功能，您需要配置一个 CORS 代理或使用特定的浏览器设置来允许跨域请求。请参考 README 中的“本地测试指南”部分。`);
-      } else {
-          setError(err instanceof Error ? err.message : '从 VirusTotal 获取数据时出错。');
-      }
+      // With the Vite proxy, we no longer need specific CORS error handling.
+      // We can now display more meaningful errors from the API itself.
+      setError(err instanceof Error ? err.message : '从 VirusTotal 获取数据时出错。');
     } finally {
         setIsLoading(false);
     }

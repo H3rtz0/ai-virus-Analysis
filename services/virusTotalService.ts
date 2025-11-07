@@ -17,7 +17,7 @@ export const calculateFileHash = async (file: File): Promise<string> => {
 };
 
 /**
- * Fetches the main file report from the VirusTotal API.
+ * Fetches the main file report from the VirusTotal API via the local Vite proxy.
  * @param fileHash The SHA-256 hash of the file.
  * @param apiKey The user's VirusTotal API key.
  * @returns The JSON response from the API.
@@ -26,9 +26,9 @@ export const getVirusTotalReport = async (fileHash: string, apiKey: string): Pro
     if (!apiKey) {
         throw new Error("VirusTotal API 密钥未提供。");
     }
-    // Note: This is a direct API call that will be blocked by CORS in a browser.
-    // This requires a backend proxy or specific browser settings for local development.
-    const url = `https://www.virustotal.com/api/v3/files/${fileHash}`;
+    // The request now goes to the local server, which will proxy it to VirusTotal.
+    // This completely avoids CORS issues in the browser.
+    const url = `/vt-api/api/v3/files/${fileHash}`;
     const options = {
         method: 'GET',
         headers: {
@@ -42,7 +42,9 @@ export const getVirusTotalReport = async (fileHash: string, apiKey: string): Pro
         throw new Error("VirusTotal 中未找到该文件的报告。这可能是一个新文件或一个良性文件。");
     }
     if (!response.ok) {
-        throw new Error(`从 VirusTotal API 获取数据时出错: ${response.status} ${response.statusText}`);
+        const errorData = await response.json().catch(() => null);
+        const errorMessage = errorData?.error?.message || `从 VirusTotal API 获取数据时出错: ${response.status} ${response.statusText}`;
+        throw new Error(errorMessage);
     }
     return response.json();
 };
@@ -75,7 +77,7 @@ export const formatVirusTotalReport = (apiResponse: any): string => {
     const detections = new Set<string>();
     if (attributes.last_analysis_results) {
         Object.values(attributes.last_analysis_results).forEach((engine: any) => {
-            if (engine.category === 'malicious') {
+            if (engine.category === 'malicious' && engine.result) {
                 detections.add(engine.result);
             }
         });
@@ -95,7 +97,7 @@ export const formatVirusTotalReport = (apiResponse: any): string => {
         report += `[沙箱行为摘要]\n`;
         sandboxNames.forEach(name => {
             const verdict = attributes.sandbox_verdicts[name];
-            report += `- ${name}: ${verdict.category} (恶意软件类别: ${verdict.malware_classification.join(', ') || 'N/A'})\n`;
+            report += `- ${name}: ${verdict.category} (恶意软件类别: ${verdict.malware_classification?.join(', ') || 'N/A'})\n`;
         });
         report += '\n';
     } else {

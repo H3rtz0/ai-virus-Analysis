@@ -11,6 +11,14 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     https: true, // 启用 HTTPS
-    allowedHosts: ['*']
+    allowedHosts: ['*'],
+    proxy: {
+      // 将 /vt-api 的请求代理到 VirusTotal
+      '/vt-api': {
+        target: 'https://www.virustotal.com',
+        changeOrigin: true, // 必须设置为 true，否则请求可能失败
+        rewrite: (path) => path.replace(/^\/vt-api/, ''), // 从请求路径中移除 /vt-api
+      },
+    },
   }
 })
