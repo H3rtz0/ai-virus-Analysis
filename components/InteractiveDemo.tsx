@@ -11,6 +11,7 @@ import { UploadIcon } from './icons/UploadIcon';
 import { AnalysisIcon } from './icons/AnalysisIcon';
 
 type AiModel = 'gemini' | 'dashscope' | 'custom';
+type InputMode = 'upload' | 'hash';
 
 const InteractiveDemo: React.FC = () => {
   const [report, setReport] = useState<string>('');
@@ -23,6 +24,10 @@ const InteractiveDemo: React.FC = () => {
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Input Mode
+  const [inputMode, setInputMode] = useState<InputMode>('upload');
+  const [inputHash, setInputHash] = useState<string>('');
+
   // API Key states
   const [selectedModel, setSelectedModel] = useState<AiModel>('gemini');
   const [geminiApiKey, setGeminiApiKey] = useState<string>('');
@@ -31,13 +36,19 @@ const InteractiveDemo: React.FC = () => {
   const [customModelApiKey, setCustomModelApiKey] = useState<string>('');
   const [vtApiKey, setVtApiKey] = useState<string>('');
 
-  const handleFileUpload = async (file: File) => {
-    setSelectedFile(file);
+  const resetState = () => {
     setReport('');
     setAnalysis(null);
     setYaraRule('');
     setError('');
     setFileHash('');
+    setSelectedFile(null);
+  };
+  
+  const handleFileUpload = async (file: File) => {
+    resetState();
+    setInputHash('');
+    setSelectedFile(file);
 
     if (!vtApiKey) {
         setError("请输入您的 VirusTotal API 密钥以自动获取报告。");
@@ -52,14 +63,36 @@ const InteractiveDemo: React.FC = () => {
       const formattedReport = virusTotalService.formatVirusTotalReport(vtResponse);
       setReport(formattedReport);
     } catch (err) {
-      // With the Vite proxy, we no longer need specific CORS error handling.
-      // We can now display more meaningful errors from the API itself.
       setError(err instanceof Error ? err.message : '从 VirusTotal 获取数据时出错。');
     } finally {
         setIsLoading(false);
     }
   };
 
+  const handleHashQuery = async () => {
+    if (!inputHash.trim()) {
+        setError("请输入有效的哈希值。");
+        return;
+    }
+     if (!vtApiKey) {
+        setError("请输入您的 VirusTotal API 密钥以查询报告。");
+        return;
+    }
+
+    resetState();
+    setIsLoading(true);
+    setFileHash(inputHash.trim()); // Show the queried hash
+
+    try {
+        const vtResponse = await virusTotalService.getVirusTotalReport(inputHash.trim(), vtApiKey);
+        const formattedReport = virusTotalService.formatVirusTotalReport(vtResponse);
+        setReport(formattedReport);
+    } catch (err) {
+        setError(err instanceof Error ? err.message : '从 VirusTotal 获取数据时出错。');
+    } finally {
+        setIsLoading(false);
+    }
+  };
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
@@ -95,13 +128,10 @@ const InteractiveDemo: React.FC = () => {
     fileInputRef.current?.click();
   };
 
-  const clearFile = () => {
-    setSelectedFile(null);
-    setFileHash('');
-    setReport('');
-    setAnalysis(null);
-    setYaraRule('');
-    setError('');
+  const clearSelection = () => {
+    resetState();
+    setInputHash('');
+    setInputMode('upload');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -203,11 +233,11 @@ const InteractiveDemo: React.FC = () => {
             </div>
           </div>
           
-          {/* Step 1: Upload */}
+          {/* Step 1: Upload / Hash Input */}
           <div>
             <h3 className="text-lg font-semibold text-gray-200 mb-2 flex items-center">
-              <span className={`flex items-center justify-center w-6 h-6 ${selectedFile ? 'bg-cyan-600' : 'bg-gray-600'} text-white rounded-full text-sm font-bold mr-3 transition-colors`}>1</span>
-              上传文件样本
+              <span className={`flex items-center justify-center w-6 h-6 ${fileHash ? 'bg-cyan-600' : 'bg-gray-600'} text-white rounded-full text-sm font-bold mr-3 transition-colors`}>1</span>
+              提供样本
             </h3>
             <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-3">
                 <div className="space-y-1">
@@ -221,38 +251,72 @@ const InteractiveDemo: React.FC = () => {
                       className="w-full p-2 bg-gray-800 text-gray-300 font-mono text-sm border border-gray-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition" 
                   />
                 </div>
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileChange}
-                  className="hidden"
-                />
-                {!selectedFile ? (
-                  <div
-                    onDrop={handleDrop}
-                    onDragOver={handleDragEvents}
-                    onDragEnter={handleDragEnter}
-                    onDragLeave={handleDragLeave}
-                    onClick={triggerFileSelect}
-                    className={`flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-lg transition-colors duration-300 cursor-pointer ${isDragging ? 'border-cyan-400 bg-gray-700/50' : 'border-gray-600 hover:border-gray-500 bg-gray-900/50'}`}
-                  >
-                    <UploadIcon className="w-10 h-10 text-gray-500 mb-3" />
-                    <p className="text-gray-400">拖放文件或 <span className="font-semibold text-cyan-400">点击上传</span></p>
-                    <p className="text-xs text-gray-500 mt-1">需要有效的 VirusTotal API Key</p>
-                  </div>
-                ) : (
-                  <div className="bg-gray-700 p-4 rounded-lg">
-                    <p className="font-bold text-white">文件已选择:</p>
-                    <div className="flex justify-between items-center mt-2">
-                        <span className="font-mono text-cyan-300 truncate">{selectedFile.name}</span>
-                        <button onClick={clearFile} className="text-sm text-red-400 hover:text-red-300 font-semibold ml-4">清除</button>
+                
+                <div className="flex items-center space-x-4 pt-2">
+                    <label className="flex items-center cursor-pointer">
+                        <input type="radio" name="inputMode" value="upload" checked={inputMode === 'upload'} onChange={() => setInputMode('upload')} className="form-radio h-4 w-4 text-cyan-600 bg-gray-700 border-gray-600 focus:ring-cyan-500" />
+                        <span className="ml-2 text-gray-200">上传文件</span>
+                    </label>
+                    <label className="flex items-center cursor-pointer">
+                        <input type="radio" name="inputMode" value="hash" checked={inputMode === 'hash'} onChange={() => setInputMode('hash')} className="form-radio h-4 w-4 text-cyan-600 bg-gray-700 border-gray-600 focus:ring-cyan-500" />
+                        <span className="ml-2 text-gray-200">输入哈希</span>
+                    </label>
+                </div>
+
+                {inputMode === 'upload' && (
+                    <div>
+                        <input
+                          type="file"
+                          ref={fileInputRef}
+                          onChange={handleFileChange}
+                          className="hidden"
+                        />
+                        {!selectedFile ? (
+                          <div
+                            onDrop={handleDrop}
+                            onDragOver={handleDragEvents}
+                            onDragEnter={handleDragEnter}
+                            onDragLeave={handleDragLeave}
+                            onClick={triggerFileSelect}
+                            className={`flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-lg transition-colors duration-300 cursor-pointer ${isDragging ? 'border-cyan-400 bg-gray-700/50' : 'border-gray-600 hover:border-gray-500 bg-gray-900/50'}`}
+                          >
+                            <UploadIcon className="w-10 h-10 text-gray-500 mb-3" />
+                            <p className="text-gray-400">拖放文件或 <span className="font-semibold text-cyan-400">点击上传</span></p>
+                          </div>
+                        ) : (
+                          <div className="bg-gray-700 p-4 rounded-lg">
+                            <p className="font-bold text-white">文件已选择:</p>
+                            <div className="flex justify-between items-center mt-2">
+                                <span className="font-mono text-cyan-300 truncate">{selectedFile.name}</span>
+                                <button onClick={clearSelection} className="text-sm text-red-400 hover:text-red-300 font-semibold ml-4">清除</button>
+                            </div>
+                          </div>
+                        )}
                     </div>
-                    {fileHash && (
-                      <div className="mt-3 pt-3 border-t border-gray-600">
-                          <p className="text-sm text-gray-300">文件 SHA-256 哈希:</p>
-                          <p className="font-mono text-xs text-yellow-300 break-all">{fileHash}</p>
-                      </div>
-                    )}
+                )}
+                {inputMode === 'hash' && (
+                    <div className="space-y-2">
+                        <input 
+                            type="text"
+                            placeholder="在此输入 SHA-256 哈希值"
+                            value={inputHash}
+                            onChange={(e) => setInputHash(e.target.value)}
+                            className="w-full p-2 bg-gray-800 text-gray-300 font-mono text-sm border border-gray-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition"
+                        />
+                         <button
+                            onClick={handleHashQuery}
+                            disabled={!inputHash.trim() || !vtApiKey || isLoading}
+                            className="w-full bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-600 text-white font-bold py-2 px-4 rounded-md flex items-center justify-center transition"
+                         >
+                             {isLoading ? <Loader /> : '查询报告'}
+                         </button>
+                    </div>
+                )}
+                 {fileHash && (
+                  <div className="mt-3 pt-3 border-t border-gray-600">
+                      <p className="text-sm text-gray-300">样本 SHA-256 哈希:</p>
+                      <p className="font-mono text-xs text-yellow-300 break-all">{fileHash}</p>
+                      {selectedFile && <button onClick={clearSelection} className="text-xs text-red-400 hover:text-red-300 font-semibold mt-2">清除文件</button>}
                   </div>
                 )}
             </div>
@@ -273,7 +337,7 @@ const InteractiveDemo: React.FC = () => {
                   onChange={(e) => setReport(e.target.value)}
                   className="w-full p-3 bg-gray-900 text-gray-300 font-mono text-sm border border-gray-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition"
                   value={report}
-                  placeholder={isLoading ? "正在从 VirusTotal 获取报告..." : "上传文件后，其报告将在此自动填充..."}
+                  placeholder={isLoading && !report ? "正在从 VirusTotal 获取报告..." : "提供样本后，其报告将在此自动填充..."}
                   readOnly
                 />
               </div>
