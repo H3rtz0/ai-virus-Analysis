@@ -6,6 +6,11 @@ const bufferToHex = (buffer: ArrayBuffer): string => {
 };
 
 export const calculateFileHash = async (file: File): Promise<string> => {
+    if (!crypto.subtle) {
+        throw new Error(
+            "Web Crypto API 不可用。此功能需要在安全上下文 (HTTPS 或 localhost) 中运行。请参考 README 中的指南来配置您的测试环境。"
+        );
+    }
     const buffer = await file.arrayBuffer();
     const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
     return bufferToHex(hashBuffer);

@@ -59,43 +59,40 @@
     -   在 **步骤 0** 中配置您选择的 AI 模型密钥。
     -   在 **步骤 1** 中配置您的 VirusTotal API 密钥。
 
-### **重要：本地测试指南 (解决 CORS 问题)**
+### **重要：云端/远程测试指南 (安全上下文要求)**
 
-当您在本地尝试使用 VirusTotal API 功能时，浏览器的控制台可能会显示一个关于 **CORS (跨源资源共享)** 的错误。这是浏览器的一项标准安全功能，可防止网页脚本向其来源域之外的服务器发出请求。
+当您在云服务器上通过 `http://<服务器IP>` 访问此应用并尝试上传文件时，您可能会遇到两种常见的、由浏览器安全策略导致的错误：
 
-**这是预料之中的行为，而非应用本身的 Bug。** 要在本地成功测试 API 功能，您需要使用以下任一方法：
+1.  **CORS (跨源资源共享) 错误**: 在调用 VirusTotal API 时，浏览器会阻止该请求。
+2.  **Web Crypto API 不可用错误**: 在计算文件哈希时，应用会报错，因为 `crypto.subtle` 功能仅在安全上下文中可用。
 
-#### 方法一：使用浏览器插件 (推荐)
+**这是预料之中的行为，而非应用本身的 Bug。** 浏览器要求像加密和跨域 API 调用这样的敏感操作必须在安全环境（**HTTPS** 或 **localhost**）下进行。
 
-最简单的方法是安装一个浏览器扩展程序来临时禁用 CORS 检查。
-1.  在您的浏览器（如 Chrome 或 Firefox）中搜索并安装一个可靠的 "CORS Unblock" 或 "Allow CORS" 插件。
-2.  **仅在测试本应用时**激活该插件。
-3.  测试完成后，**请务必禁用该插件**，以恢复浏览器的正常安全状态。
+要在您的云服务器上成功测试完整功能，您需要创建一个安全上下文。最简单的方法是使用一个反向代理或隧道服务来为您的开发服务器提供 HTTPS 地址。
 
-#### 方法二：启动一个本地代理服务器
+#### 解决方案：使用 `ngrok` (推荐)
 
-这是一种更专业的方法。您可以在本地运行一个简单的代理服务器，它会接收您应用的请求，然后将其转发到 VirusTotal，并将响应返回给您的应用。
-您可以使用 `cors-anywhere` 或其他类似的工具来快速搭建。
+`ngrok` 是一个流行的工具，可以为您的本地服务创建一个安全的公共 HTTPS URL。
 
-#### 方法三：使用特定的浏览器启动标志 (仅限高级用户)
-
-您可以带着禁用网页安全的标志启动浏览器。**此方法具有安全风险，请仅在您完全了解其后果的情况下使用，并且切勿使用此浏览器访问任何其他网站。**
-
--   **对于 Chrome (Windows)**:
+1.  [下载并安装 ngrok](https://ngrok.com/download)。
+2.  在 ngrok 网站上注册一个免费账户并获取您的 authtoken。
+3.  配置您的 authtoken：
     ```bash
-    "C:\Program Files\Google\Chrome\Application\chrome.exe" --disable-web-security --user-data-dir="C:/ChromeDevSession"
+    ngrok config add-authtoken <YOUR_AUTHTOKEN>
     ```
+4.  在您的项目正常运行 (`npm run start`) 后，它会在一个端口上监听（例如 `5173`）。在**另一个终端窗口**中，启动 ngrok 将流量转发到该端口：
+    ```bash
+    ngrok http 5173
+    ```
+5.  `ngrok` 将会提供一个 `https://` 开头的 URL (例如 `https://random-string.ngrok-free.app`)。**使用这个 HTTPS URL** 在任何设备上访问您的应用。现在，文件哈希和 API 调用功能都应该可以正常工作了。
 
-选择上述任一方法后，刷新应用页面，VirusTotal API 的自动获取功能应该就能正常工作了。
 
 ## 项目结构
 
 ```
 /
-├── src/
-│   ├── components/       # React 组件 (UI)
-│   ├── services/         # API 调用和业务逻辑
-│   └── ...
+├── components/       # React 组件 (UI)
+├── services/         # API 调用和业务逻辑
 ├── index.html            # HTML 入口文件
 ├── package.json          # 项目依赖和脚本
 └── README.md             # 项目说明文档
