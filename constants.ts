@@ -40,25 +40,25 @@ export const GUIDE_STEPS: GuideStepContent[] = [
     {
         title: "第一步：数据收集与准备",
         description: "从沙箱化的恶意软件执行中收集行为报告。这些报告（如演示中的示例）包含有关文件、注册表和网络活动的原始数据。这些数据是我们进行 AI 分析的基础。",
-        // Fix: Replaced JSX with React.createElement to be valid in a .ts file.
+        // Fix: Replaced JSX syntax with React.createElement to avoid parsing errors in a .ts file.
         icon: React.createElement(AnalysisIcon)
     },
     {
         title: "第二步：AI 驱动的特征提取",
         description: "使用像 Gemini 这样的强大生成模型来解析原始文本报告。AI 的任务是理解上下文、提取关键行为、识别入侵指标 (IOCs)，并将行为映射到已知的威胁框架（如 MITRE ATT&CK）。这将非结构化文本转化为结构化的、可操作的情报。",
-        // Fix: Replaced JSX with React.createElement to be valid in a .ts file.
+        // Fix: Replaced JSX syntax with React.createElement to avoid parsing errors in a .ts file.
         icon: React.createElement(CodeIcon)
     },
     {
         title: "第三步：相似性分析与聚类",
         description: "AI 输出的结构化 JSON 可以转换为数值向量（嵌入）。通过计算这些向量之间的相似度（例如，余弦相似度），您可以将新的恶意软件样本与已知威胁进行识别和聚类，即使它们使用不同的代码。",
-        // Fix: Replaced JSX with React.createElement to be valid in a .ts file.
+        // Fix: Replaced JSX syntax with React.createElement to avoid parsing errors in a .ts file.
         icon: React.createElement(SimilarityIcon)
     },
     {
         title: "第四步：验证与自动化响应",
         description: "根据现有的威胁情报验证 AI 的发现。一旦验证通过，这些结构化数据就可用于自动生成检测规则（如 YARA）、更新阻止列表，并触发事件响应工作流，从而极大地加速您的防御周期。",
-        // Fix: Replaced JSX with React.createElement to be valid in a .ts file.
+        // Fix: Replaced JSX syntax with React.createElement to avoid parsing errors in a .ts file.
         icon: React.createElement(AnalysisIcon)
     }
 ];

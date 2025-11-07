@@ -9,6 +9,7 @@ import CodeBlock from './CodeBlock';
 import { SimilarityIcon } from './icons/SimilarityIcon';
 import { UploadIcon } from './icons/UploadIcon';
 import { AnalysisIcon } from './icons/AnalysisIcon';
+import AnalysisDashboard from './AnalysisDashboard';
 
 type AiModel = 'gemini' | 'dashscope' | 'custom';
 type InputMode = 'upload' | 'hash';
@@ -338,7 +339,6 @@ const InteractiveDemo: React.FC = () => {
                   className="w-full p-3 bg-gray-900 text-gray-300 font-mono text-sm border border-gray-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition"
                   value={report}
                   placeholder={isLoading && !report ? "正在从 VirusTotal 获取报告..." : "提供样本后，其报告将在此自动填充..."}
-                  readOnly
                 />
               </div>
           </div>
@@ -365,7 +365,7 @@ const InteractiveDemo: React.FC = () => {
               <span className={`flex items-center justify-center w-6 h-6 ${analysis ? 'bg-cyan-600' : 'bg-gray-600'} text-white rounded-full text-sm font-bold mr-3 transition-colors`}>4</span>
               查看分析结果
           </h3>
-          <div className="flex-grow bg-gray-900 border border-gray-600 rounded-md p-4 flex flex-col justify-center min-h-[400px]">
+          <div className="flex-grow bg-gray-900/70 border border-gray-600 rounded-md p-4 flex flex-col justify-center min-h-[400px]">
             {isLoading && !analysis && <div className="text-center text-gray-400 flex flex-col items-center"><Loader /><span className="mt-2">正在生成分析结果...</span></div>}
             {error && <div className="text-center text-red-400 p-4 bg-red-900/50 rounded-md whitespace-pre-wrap"><b>错误:</b> {error}</div>}
             
@@ -377,8 +377,8 @@ const InteractiveDemo: React.FC = () => {
             )}
 
             {analysis && (
-              <div className="space-y-4 overflow-y-auto max-h-[620px] pr-2">
-                <CodeBlock language="JSON" code={JSON.stringify(analysis, null, 2)} title="结构化分析" />
+              <div className="space-y-6 overflow-y-auto h-[calc(100vh-250px)] min-h-[600px] p-1">
+                <AnalysisDashboard analysis={analysis} />
                 {yaraRule && <CodeBlock language="YARA" code={yaraRule} title="生成的 YARA 规则" />}
                 <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
                     <h4 className="font-semibold text-cyan-400 flex items-center mb-2"><SimilarityIcon className="w-5 h-5 mr-2" />模拟相似度得分</h4>
