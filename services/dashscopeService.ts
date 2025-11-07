@@ -1,10 +1,10 @@
 import { type AnalysisResult } from '../types';
 
-const API_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation';
-// 使用一个有较强能力且支持 Function Calling 的模型
+// 更新为通义千问的 OpenAI 兼容模式地址
+const API_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 const MODEL_NAME = 'qwen-plus'; 
 
-// 这是 DashScope Function Calling 所需的 JSON Schema 格式
+// OpenAI 兼容的 Function Calling schema
 const analysisSchema = {
     type: 'object',
     properties: {
@@ -60,28 +60,28 @@ const callDashScopeAPI = async (apiKey: string, body: object) => {
     });
 
     if (!response.ok) {
+        const errorBody = await response.text();
+        console.error("DashScope API Error Response:", errorBody);
         throw new Error(`DashScope API 错误: ${response.status} ${response.statusText}`);
     }
 
     const data = await response.json();
-    if (data.code) { // DashScope returns error details in the body
-        throw new Error(`DashScope API 错误: ${data.message} (code: ${data.code})`);
+    if (data.error) {
+        throw new Error(`DashScope API 错误: ${data.error.message}`);
     }
-
     return data;
 };
 
 export const analyzeMalwareReport = async (report: string, apiKey: string): Promise<AnalysisResult> => {
     const prompt = `请分析以下恶意软件沙箱报告。你的角色是一位资深的恶意软件逆向工程师。调用 'extract_malware_info' 函数来提取关键信息并进行结构化。请确保结果精确而全面。\n\n---报告开始---\n${report}\n---报告结束---`;
 
+    // 适配 OpenAI 的请求体格式
     const body = {
         model: MODEL_NAME,
-        input: {
-            messages: [
-                { role: 'system', content: 'You are a helpful assistant.' },
-                { role: 'user', content: prompt }
-            ]
-        },
+        messages: [
+            { role: 'system', content: 'You are a helpful assistant that uses tools to extract information.' },
+            { role: 'user', content: prompt }
+        ],
         tools: [
             {
                 type: 'function',
@@ -91,20 +91,22 @@ export const analyzeMalwareReport = async (report: string, apiKey: string): Prom
                     parameters: analysisSchema
                 }
             }
-        ]
+        ],
+        tool_choice: { type: "function", function: { name: "extract_malware_info" } }
     };
     
     try {
         const data = await callDashScopeAPI(apiKey, body);
-        const toolCall = data.output.tool_calls?.[0];
+        // 适配 OpenAI 的响应体格式
+        const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
         if (toolCall && toolCall.type === 'function') {
             const args = toolCall.function.arguments;
             return JSON.parse(args) as AnalysisResult;
         }
-        throw new Error("模型未能按预期调用函数。");
+        throw new Error("模型未能按预期调用函数。请检查模型是否支持 Function/Tool Calling。");
     } catch (error) {
         console.error("分析恶意软件报告时出错 (DashScope):", error);
-        throw new Error("从 DashScope API 获取分析失败。请检查 API 密钥和网络连接。");
+        throw new Error(`从 DashScope API 获取分析失败。请检查 API 密钥和网络连接。 ${error instanceof Error ? error.message : ''}`);
     }
 };
 
@@ -128,23 +130,26 @@ export const generateYaraRule = async (analysis: AnalysisResult, apiKey: string)
     请仅生成 YARA 规则代码，不要包含任何解释或 markdown 格式。
     `;
 
+    // 适配 OpenAI 的请求体格式
     const body = {
         model: MODEL_NAME,
-        input: {
-            messages: [
-                { role: 'system', content: 'You are a helpful assistant that only generates YARA code.' },
-                { role: 'user', content: prompt }
-            ]
-        }
+        messages: [
+            { role: 'system', content: 'You are a helpful assistant that only generates YARA code.' },
+            { role: 'user', content: prompt }
+        ]
     };
 
     try {
         const data = await callDashScopeAPI(apiKey, body);
-        const yaraRule = data.output.text;
+        // 适配 OpenAI 的响应体格式
+        const yaraRule = data.choices?.[0]?.message?.content;
+        if (!yaraRule) {
+            throw new Error("API 响应中未找到生成的代码。");
+        }
         const regex = /`{3}(yara\n)?|`{3}/g;
         return yaraRule.replace(regex, '').trim();
     } catch (error) {
         console.error("生成 YARA 规则时出错 (DashScope):", error);
-        throw new Error("从 DashScope API 生成 YARA 规则失败。");
+        throw new Error(`从 DashScope API 生成 YARA 规则失败。 ${error instanceof Error ? error.message : ''}`);
     }
 };
