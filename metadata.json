@@ -1,0 +1,5 @@
+{
+  "name": "AI 恶意软件分析实现器",
+  "description": "一个交互式指南，用于实现 VirusTotal 博客中描述的 AI 驱动的恶意软件相似性分析解决方案。该工具使用 Gemini 分析恶意软件报告、提取特征并生成检测规则。",
+  "requestFramePermissions": []
+}
