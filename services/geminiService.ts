@@ -1,10 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { type AnalysisResult } from '../types';
 
-if (!process.env.API_KEY) {
-    throw new Error("API_KEY environment variable is not set");
-}
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// The global `ai` instance is removed to allow passing the API key per-request.
 
 const analysisSchema = {
     type: Type.OBJECT,
@@ -47,7 +44,12 @@ const analysisSchema = {
 };
 
 
-export const analyzeMalwareReport = async (report: string): Promise<AnalysisResult> => {
+export const analyzeMalwareReport = async (report: string, apiKey: string): Promise<AnalysisResult> => {
+    if (!apiKey) {
+        throw new Error("Gemini API 密钥未提供。");
+    }
+    const ai = new GoogleGenAI({ apiKey });
+
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
@@ -61,12 +63,17 @@ export const analyzeMalwareReport = async (report: string): Promise<AnalysisResu
         const jsonText = response.text.trim();
         return JSON.parse(jsonText) as AnalysisResult;
     } catch (error) {
-        console.error("分析恶意软件报告时出错:", error);
-        throw new Error("从 Gemini API 获取分析失败。");
+        console.error("分析恶意软件报告时出错 (Gemini):", error);
+        throw new Error("从 Gemini API 获取分析失败。请检查 API 密钥和网络连接。");
     }
 };
 
-export const generateYaraRule = async (analysis: AnalysisResult): Promise<string> => {
+export const generateYaraRule = async (analysis: AnalysisResult, apiKey: string): Promise<string> => {
+    if (!apiKey) {
+        throw new Error("Gemini API 密钥未提供。");
+    }
+    const ai = new GoogleGenAI({ apiKey });
+    
     const keyStrings = [
         ...analysis.indicators_of_compromise.files,
         ...analysis.indicators_of_compromise.registry_keys,
@@ -75,7 +82,7 @@ export const generateYaraRule = async (analysis: AnalysisResult): Promise<string
 
     const prompt = `
     基于以下恶意软件分析，生成一条简单但有效的 YARA 规则。
-    规则应命名为 "Suspicious_${analysis.malware_family_guess.replace(new RegExp('\\s+', 'g'), '_') || 'Behavior'}".
+    规则应命名为 "Suspicious_${analysis.malware_family_guess.replace(/\s+/g, '_') || 'Behavior'}".
     在 meta 部分包含来自分析摘要的描述，并将作者标记为 "Gemini AI Analyst"。
     strings 部分应专注于提供的最独特的指标。
 
@@ -94,10 +101,10 @@ export const generateYaraRule = async (analysis: AnalysisResult): Promise<string
         
         const yaraRule = response.text;
         // 清理可能存在的 markdown 代码块
-        const regex = new RegExp('`{3}yara\\n|`{3}', 'g');
+        const regex = /`{3}(yara\n)?|`{3}/g;
         return yaraRule.replace(regex, '').trim();
     } catch (error) {
-        console.error("生成 YARA 规则时出错:", error);
+        console.error("生成 YARA 规则时出错 (Gemini):", error);
         throw new Error("从 Gemini API 生成 YARA 规则失败。");
     }
 };

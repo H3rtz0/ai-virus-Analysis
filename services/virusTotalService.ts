@@ -11,98 +11,100 @@ export const calculateFileHash = async (file: File): Promise<string> => {
     return bufferToHex(hashBuffer);
 };
 
-// This function will attempt to build a behavior-like report from VT API data
-const formatReportFromVTData = (data: any): string => {
-    const attributes = data?.data?.attributes;
-    if (!attributes) {
-        return "在 VirusTotal 响应中未找到任何属性。";
+/**
+ * Fetches the main file report from the VirusTotal API.
+ * @param fileHash The SHA-256 hash of the file.
+ * @param apiKey The user's VirusTotal API key.
+ * @returns The JSON response from the API.
+ */
+export const getVirusTotalReport = async (fileHash: string, apiKey: string): Promise<any> => {
+    if (!apiKey) {
+        throw new Error("VirusTotal API 密钥未提供。");
     }
-
-    let report = `Process: ${attributes.names?.[0] || 'Unknown'}\n\n`;
-
-    const fileSystem = new Set<string>();
-    const registry = new Set<string>();
-    const network = new Set<string>();
-
-    // Crowdsourced data often has behavior snippets
-    const behaviors = attributes.crowdsourced_ids_results || [];
-    for (const behavior of behaviors) {
-        (behavior.attributes.files_written || []).forEach((f: string) => fileSystem.add(`- 创建文件: ${f}`));
-        (behavior.attributes.files_dropped || []).forEach((f: any) => fileSystem.add(`- 释放文件: ${f.filename} (SHA256: ${f.sha256})`));
-        (behavior.attributes.registry_keys_set || []).forEach((r: string) => registry.add(`- 设置注册表项: ${r}`));
-        (behavior.attributes.network_communications || []).forEach((n: any) => network.add(`- 连接到 IP: ${n.destination_ip} 端口 ${n.destination_port} (${n.transport_layer_protocol})`));
-    }
-    
-    // Add some PE info if available
-    if(attributes.pe_info?.import_list){
-        for(const imp of attributes.pe_info.import_list){
-            if (imp.library_name === 'ws2_32.dll') {
-                imp.imported_functions.forEach((func: string) => {
-                    if (['socket', 'connect', 'send', 'recv'].includes(func)) {
-                        network.add(`- 导入网络函数: ${func} from ${imp.library_name}`);
-                    }
-                });
-            }
-        }
-    }
-
-
-    report += "[文件系统活动]\n";
-    if (fileSystem.size > 0) {
-        report += [...fileSystem].join('\n') + '\n\n';
-    } else {
-        report += "- 未检测到重要活动。\n\n";
-    }
-
-    report += "[注册表活动]\n";
-    if (registry.size > 0) {
-        report += [...registry].join('\n') + '\n\n';
-    } else {
-        report += "- 未检测到重要活动。\n\n";
-    }
-    
-    report += "[网络活动]\n";
-    if (network.size > 0) {
-        report += [...network].join('\n') + '\n\n';
-    } else {
-        report += "- 未检测到重要活动。\n\n";
-    }
-    
-    report += `[分析摘要]\n- 无害: ${attributes.last_analysis_stats?.harmless || 0}, 恶意: ${attributes.last_analysis_stats?.malicious || 0}, 可疑: ${attributes.last_analysis_stats?.suspicious || 0}`;
-
-    return report;
-};
-
-
-export const getVirusTotalReport = async (file: File): Promise<string> => {
-    // In a real local setup, you'd use a .env file for this.
-    // For this playground, we assume it's set in the environment.
-    if (!process.env.VIRUSTOTAL_API_KEY) {
-        throw new Error("VirusTotal API 密钥未配置。请在您的本地环境中添加 VIRUSTOTAL_API_KEY。");
-    }
-    
-    const hash = await calculateFileHash(file);
-    const url = `https://www.virustotal.com/api/v3/files/${hash}`;
-    
+    // Note: This is a direct API call that will be blocked by CORS in a browser.
+    // This requires a backend proxy or specific browser settings for local development.
+    const url = `https://www.virustotal.com/api/v3/files/${fileHash}`;
     const options = {
         method: 'GET',
         headers: {
-            'x-apikey': process.env.VIRUSTOTAL_API_KEY,
+            'x-apikey': apiKey
         }
     };
+    
+    const response = await fetch(url, options);
 
-    try {
-        const response = await fetch(url, options);
-        if (!response.ok) {
-            if (response.status === 404) {
-                return `文件哈希 ${hash} 在 VirusTotal 上未找到。您可能需要先在那里上传它。`;
-            }
-            throw new Error(`VirusTotal API 错误: ${response.status} ${response.statusText}`);
-        }
-        const data = await response.json();
-        return formatReportFromVTData(data);
-    } catch (error) {
-        console.error("从 VirusTotal 获取数据时出错:", error);
-        throw new Error("无法从 VirusTotal 获取报告。");
+    if (response.status === 404) {
+        throw new Error("VirusTotal 中未找到该文件的报告。这可能是一个新文件或一个良性文件。");
     }
+    if (!response.ok) {
+        throw new Error(`从 VirusTotal API 获取数据时出错: ${response.status} ${response.statusText}`);
+    }
+    return response.json();
+};
+
+/**
+ * Formats the complex JSON response from VirusTotal into a simple, human-readable text report.
+ * This is a simplified parser focusing on key indicators.
+ * @param apiResponse The raw JSON object from the getVirusTotalReport function.
+ * @returns A formatted string report.
+ */
+export const formatVirusTotalReport = (apiResponse: any): string => {
+    const attributes = apiResponse.data?.attributes;
+    if (!attributes) {
+        return "无法从 API 响应中解析报告。数据结构可能不符合预期。";
+    }
+
+    let report = `--- VirusTotal 自动提取报告 ---\n\n`;
+    report += `主要文件名: ${attributes.names?.[0] || 'N/A'}\n`;
+    report += `文件类型: ${attributes.type_description || 'N/A'}\n`;
+    report += `文件大小: ${attributes.size} 字节\n\n`;
+
+    if (attributes.last_analysis_stats) {
+        const stats = attributes.last_analysis_stats;
+        report += `[引擎检测摘要]\n`;
+        report += `- 恶意: ${stats.malicious}\n`;
+        report += `- 可疑: ${stats.suspicious}\n`;
+        report += `- 无害: ${stats.harmless}\n\n`;
+    }
+
+    const detections = new Set<string>();
+    if (attributes.last_analysis_results) {
+        Object.values(attributes.last_analysis_results).forEach((engine: any) => {
+            if (engine.category === 'malicious') {
+                detections.add(engine.result);
+            }
+        });
+    }
+
+    if (detections.size > 0) {
+        report += `[主要检测名称]\n`;
+        Array.from(detections).slice(0, 5).forEach(detection => {
+            report += `- ${detection}\n`;
+        });
+        report += '\n';
+    }
+
+    // Attempt to extract some behavioral indicators if available in the main report
+    const sandboxNames = attributes.sandbox_verdicts ? Object.keys(attributes.sandbox_verdicts) : [];
+    if (sandboxNames.length > 0) {
+        report += `[沙箱行为摘要]\n`;
+        sandboxNames.forEach(name => {
+            const verdict = attributes.sandbox_verdicts[name];
+            report += `- ${name}: ${verdict.category} (恶意软件类别: ${verdict.malware_classification.join(', ') || 'N/A'})\n`;
+        });
+        report += '\n';
+    } else {
+        report += `[沙箱行为摘要]\n- 在主报告中未找到详细的沙箱行为数据。完整的动态分析可能需要访问 'Behavior' 标签页或特定的 API 端点。\n\n`;
+    }
+    
+    if (attributes.pe_info?.import_list) {
+         report += `[部分导入的 DLLs]\n`;
+         attributes.pe_info.import_list.slice(0, 5).forEach((imp: any) => {
+             report += `- ${imp.library_name}\n`;
+         });
+         report += '\n';
+    }
+
+    report += `--- 报告结束 ---`;
+    return report;
 };

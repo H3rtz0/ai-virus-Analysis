@@ -1,6 +1,8 @@
 import React, { useState, useCallback, useRef } from 'react';
-import { analyzeMalwareReport, generateYaraRule } from '../services/geminiService';
-import { getVirusTotalReport } from '../services/virusTotalService';
+import * as geminiService from '../services/geminiService';
+import * as dashscopeService from '../services/dashscopeService';
+import * as customModelService from '../services/customModelService';
+import * as virusTotalService from '../services/virusTotalService';
 import { type AnalysisResult } from '../types';
 import Loader from './Loader';
 import CodeBlock from './CodeBlock';
@@ -8,37 +10,58 @@ import { SimilarityIcon } from './icons/SimilarityIcon';
 import { UploadIcon } from './icons/UploadIcon';
 import { AnalysisIcon } from './icons/AnalysisIcon';
 
+type AiModel = 'gemini' | 'dashscope' | 'custom';
+
 const InteractiveDemo: React.FC = () => {
   const [report, setReport] = useState<string>('');
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [yaraRule, setYaraRule] = useState<string>('');
-  const [isLoading, setIsLoading] = useState<boolean>(false); // Gemini loading
-  const [isVtLoading, setIsVtLoading] = useState<boolean>(false); // VT loading
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
-  const [vtError, setVtError] = useState<string>('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileHash, setFileHash] = useState<string>('');
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+
+  // API Key states
+  const [selectedModel, setSelectedModel] = useState<AiModel>('gemini');
+  const [geminiApiKey, setGeminiApiKey] = useState<string>('');
+  const [dashscopeApiKey, setDashscopeApiKey] = useState<string>('');
+  const [customModelUrl, setCustomModelUrl] = useState<string>('');
+  const [customModelApiKey, setCustomModelApiKey] = useState<string>('');
+  const [vtApiKey, setVtApiKey] = useState<string>('');
+
   const handleFileUpload = async (file: File) => {
     setSelectedFile(file);
-    // Reset everything
     setReport('');
     setAnalysis(null);
     setYaraRule('');
     setError('');
-    setVtError('');
-    setIsVtLoading(true);
+    setFileHash('');
 
+    if (!vtApiKey) {
+        setError("请输入您的 VirusTotal API 密钥以自动获取报告。");
+        return;
+    }
+
+    setIsLoading(true);
     try {
-      const vtReport = await getVirusTotalReport(file);
-      setReport(vtReport);
+      const hash = await virusTotalService.calculateFileHash(file);
+      setFileHash(hash);
+      const vtResponse = await virusTotalService.getVirusTotalReport(hash, vtApiKey);
+      const formattedReport = virusTotalService.formatVirusTotalReport(vtResponse);
+      setReport(formattedReport);
     } catch (err) {
-      setVtError(err instanceof Error ? err.message : '获取 VirusTotal 报告时发生未知错误。');
+      if (err instanceof Error && (err.message.includes('Failed to fetch') || err.message.includes('CORS'))) {
+          setError(`获取报告失败，这很可能是由浏览器的 CORS 安全策略导致的。这是一个标准的安全措施，而非应用本身的错误。要在本地测试此功能，您需要配置一个 CORS 代理或使用特定的浏览器设置来允许跨域请求。请参考 README 中的“本地测试指南”部分。`);
+      } else {
+          setError(err instanceof Error ? err.message : '从 VirusTotal 获取数据时出错。');
+      }
     } finally {
-      setIsVtLoading(false);
+        setIsLoading(false);
     }
   };
+
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     if (event.target.files && event.target.files[0]) {
@@ -76,16 +99,15 @@ const InteractiveDemo: React.FC = () => {
 
   const clearFile = () => {
     setSelectedFile(null);
+    setFileHash('');
     setReport('');
     setAnalysis(null);
     setYaraRule('');
     setError('');
-    setVtError('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   };
-
 
   const handleAnalysis = useCallback(async () => {
     setIsLoading(true);
@@ -94,102 +116,183 @@ const InteractiveDemo: React.FC = () => {
     setYaraRule('');
 
     try {
-      const analysisResult = await analyzeMalwareReport(report);
-      setAnalysis(analysisResult);
+      let analysisResult: AnalysisResult;
+      let rule: string;
 
-      const rule = await generateYaraRule(analysisResult);
+      if (selectedModel === 'gemini') {
+        analysisResult = await geminiService.analyzeMalwareReport(report, geminiApiKey);
+        setAnalysis(analysisResult);
+        rule = await geminiService.generateYaraRule(analysisResult, geminiApiKey);
+      } else if (selectedModel === 'dashscope') {
+        analysisResult = await dashscopeService.analyzeMalwareReport(report, dashscopeApiKey);
+        setAnalysis(analysisResult);
+        rule = await dashscopeService.generateYaraRule(analysisResult, dashscopeApiKey);
+      } else { // custom
+        analysisResult = await customModelService.analyzeMalwareReport(report, customModelUrl, customModelApiKey);
+        setAnalysis(analysisResult);
+        rule = await customModelService.generateYaraRule(analysisResult, customModelUrl, customModelApiKey);
+      }
+      
       setYaraRule(rule);
     } catch (err) {
       setError(err instanceof Error ? err.message : '发生未知错误。');
     } finally {
       setIsLoading(false);
     }
-  }, [report]);
+  }, [report, selectedModel, geminiApiKey, dashscopeApiKey, customModelUrl, customModelApiKey]);
+
+  const isAnalyzeButtonDisabled = () => {
+    if (isLoading || !report.trim()) return true;
+    switch (selectedModel) {
+        case 'gemini': return !geminiApiKey;
+        case 'dashscope': return !dashscopeApiKey;
+        case 'custom': return !customModelUrl || !customModelApiKey;
+        default: return true;
+    }
+  };
   
+  const getModelName = () => {
+    switch (selectedModel) {
+        case 'gemini': return 'Gemini';
+        case 'dashscope': return '通义千问';
+        case 'custom': return '自定义模型';
+        default: return 'AI';
+    }
+  }
+
   return (
     <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-2xl">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Input Column */}
         <div className="flex flex-col space-y-4">
           
+          {/* Step 0: API Key Config */}
+          <div>
+            <h3 className="text-lg font-semibold text-gray-200 mb-2 flex items-center">
+              <span className="flex items-center justify-center w-6 h-6 bg-cyan-600 text-white rounded-full text-sm font-bold mr-3">0</span>
+              AI 模型配置
+            </h3>
+            <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-3">
+                <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">选择 AI 模型</label>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                        <label className="flex items-center cursor-pointer">
+                            <input type="radio" name="model" value="gemini" checked={selectedModel === 'gemini'} onChange={() => setSelectedModel('gemini')} className="form-radio h-4 w-4 text-cyan-600 bg-gray-700 border-gray-600 focus:ring-cyan-500" />
+                            <span className="ml-2 text-gray-200">Google Gemini</span>
+                        </label>
+                        <label className="flex items-center cursor-pointer">
+                            <input type="radio" name="model" value="dashscope" checked={selectedModel === 'dashscope'} onChange={() => setSelectedModel('dashscope')} className="form-radio h-4 w-4 text-cyan-600 bg-gray-700 border-gray-600 focus:ring-cyan-500" />
+                            <span className="ml-2 text-gray-200">通义千问</span>
+                        </label>
+                        <label className="flex items-center cursor-pointer">
+                            <input type="radio" name="model" value="custom" checked={selectedModel === 'custom'} onChange={() => setSelectedModel('custom')} className="form-radio h-4 w-4 text-cyan-600 bg-gray-700 border-gray-600 focus:ring-cyan-500" />
+                            <span className="ml-2 text-gray-200">自定义模型</span>
+                        </label>
+                    </div>
+                </div>
+                {selectedModel === 'gemini' && (
+                    <input type="password" placeholder="输入您的 Google Gemini API Key" value={geminiApiKey} onChange={(e) => setGeminiApiKey(e.target.value)} className="w-full p-2 bg-gray-800 text-gray-300 font-mono text-sm border border-gray-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition" />
+                )}
+                {selectedModel === 'dashscope' && (
+                    <input type="password" placeholder="输入您的 DashScope API Key" value={dashscopeApiKey} onChange={(e) => setDashscopeApiKey(e.target.value)} className="w-full p-2 bg-gray-800 text-gray-300 font-mono text-sm border border-gray-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition" />
+                )}
+                {selectedModel === 'custom' && (
+                    <div className="space-y-2">
+                         <input type="text" placeholder="输入模型 API URL (兼容 OpenAI)" value={customModelUrl} onChange={(e) => setCustomModelUrl(e.target.value)} className="w-full p-2 bg-gray-800 text-gray-300 font-mono text-sm border border-gray-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition" />
+                         <input type="password" placeholder="输入模型 API Key" value={customModelApiKey} onChange={(e) => setCustomModelApiKey(e.target.value)} className="w-full p-2 bg-gray-800 text-gray-300 font-mono text-sm border border-gray-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition" />
+                    </div>
+                )}
+            </div>
+          </div>
+          
           {/* Step 1: Upload */}
           <div>
             <h3 className="text-lg font-semibold text-gray-200 mb-2 flex items-center">
-              <span className="flex items-center justify-center w-6 h-6 bg-cyan-600 text-white rounded-full text-sm font-bold mr-3">1</span>
+              <span className={`flex items-center justify-center w-6 h-6 ${selectedFile ? 'bg-cyan-600' : 'bg-gray-600'} text-white rounded-full text-sm font-bold mr-3 transition-colors`}>1</span>
               上传文件样本
             </h3>
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileChange}
-              className="hidden"
-            />
-            {!selectedFile ? (
-              <div
-                onDrop={handleDrop}
-                onDragOver={handleDragEvents}
-                onDragEnter={handleDragEnter}
-                onDragLeave={handleDragLeave}
-                onClick={triggerFileSelect}
-                className={`flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-lg cursor-pointer transition-colors duration-300 ${isDragging ? 'border-cyan-400 bg-gray-700/50' : 'border-gray-600 hover:border-gray-500 bg-gray-900/50'}`}
-              >
-                <UploadIcon className="w-10 h-10 text-gray-500 mb-3" />
-                <p className="text-gray-400">拖放文件或 <span className="font-semibold text-cyan-400">点击上传</span></p>
-                <p className="text-xs text-gray-500 mt-1">应用将自动从 VirusTotal 获取报告</p>
-              </div>
-            ) : (
-              <div className="bg-gray-700 p-4 rounded-lg">
-                <p className="font-bold text-white">文件已选择:</p>
-                <div className="flex justify-between items-center mt-2">
-                    <span className="font-mono text-cyan-300 truncate">{selectedFile.name}</span>
-                    <button onClick={clearFile} className="text-sm text-red-400 hover:text-red-300 font-semibold ml-4">清除</button>
+            <div className="bg-gray-900/50 p-4 rounded-lg border border-gray-700 space-y-3">
+                <div className="space-y-1">
+                  <label htmlFor="vt-key" className="block text-sm font-medium text-gray-300">VirusTotal API Key</label>
+                  <input 
+                      id="vt-key"
+                      type="password" 
+                      placeholder="在此输入您的 VT Key 以自动获取报告" 
+                      value={vtApiKey} 
+                      onChange={(e) => setVtApiKey(e.target.value)} 
+                      className="w-full p-2 bg-gray-800 text-gray-300 font-mono text-sm border border-gray-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition" 
+                  />
                 </div>
-              </div>
-            )}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+                {!selectedFile ? (
+                  <div
+                    onDrop={handleDrop}
+                    onDragOver={handleDragEvents}
+                    onDragEnter={handleDragEnter}
+                    onDragLeave={handleDragLeave}
+                    onClick={triggerFileSelect}
+                    className={`flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-lg transition-colors duration-300 cursor-pointer ${isDragging ? 'border-cyan-400 bg-gray-700/50' : 'border-gray-600 hover:border-gray-500 bg-gray-900/50'}`}
+                  >
+                    <UploadIcon className="w-10 h-10 text-gray-500 mb-3" />
+                    <p className="text-gray-400">拖放文件或 <span className="font-semibold text-cyan-400">点击上传</span></p>
+                    <p className="text-xs text-gray-500 mt-1">需要有效的 VirusTotal API Key</p>
+                  </div>
+                ) : (
+                  <div className="bg-gray-700 p-4 rounded-lg">
+                    <p className="font-bold text-white">文件已选择:</p>
+                    <div className="flex justify-between items-center mt-2">
+                        <span className="font-mono text-cyan-300 truncate">{selectedFile.name}</span>
+                        <button onClick={clearFile} className="text-sm text-red-400 hover:text-red-300 font-semibold ml-4">清除</button>
+                    </div>
+                    {fileHash && (
+                      <div className="mt-3 pt-3 border-t border-gray-600">
+                          <p className="text-sm text-gray-300">文件 SHA-256 哈希:</p>
+                          <p className="font-mono text-xs text-yellow-300 break-all">{fileHash}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+            </div>
           </div>
 
           {/* Step 2: Review Report */}
           <div>
-              <h3 className="text-lg font-semibold text-gray-200 mb-2 flex items-center">
-                <span className={`flex items-center justify-center w-6 h-6 ${report.trim() ? 'bg-cyan-600' : 'bg-gray-600'} text-white rounded-full text-sm font-bold mr-3 transition-colors`}>2</span>
-                审查行为报告
+              <h3 className="text-lg font-semibold text-gray-200 mb-2 flex items-center justify-between">
+                <div className='flex items-center'>
+                  <span className={`flex items-center justify-center w-6 h-6 ${report.trim() ? 'bg-cyan-600' : 'bg-gray-600'} text-white rounded-full text-sm font-bold mr-3 transition-colors`}>2</span>
+                  行为报告
+                </div>
               </h3>
               <div className="relative">
                 <textarea
                   id="malware-report"
                   rows={15}
-                  readOnly
+                  onChange={(e) => setReport(e.target.value)}
                   className="w-full p-3 bg-gray-900 text-gray-300 font-mono text-sm border border-gray-600 rounded-md focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition"
                   value={report}
-                  placeholder="上传文件后，其 VirusTotal 报告将显示在此处..."
+                  placeholder={isLoading ? "正在从 VirusTotal 获取报告..." : "上传文件后，其报告将在此自动填充..."}
+                  readOnly
                 />
-                {isVtLoading && (
-                    <div className="absolute inset-0 bg-gray-900/80 flex flex-col items-center justify-center rounded-md">
-                        <Loader/>
-                        <span className="mt-2 text-gray-300">正在从 VirusTotal 获取报告...</span>
-                    </div>
-                )}
-                {vtError && (
-                     <div className="absolute inset-0 bg-red-900/90 flex flex-col items-center justify-center rounded-md p-4 text-center">
-                        <p className="text-red-300 font-semibold">获取报告失败</p>
-                        <p className="text-red-400 text-sm mt-2">{vtError}</p>
-                    </div>
-                )}
               </div>
           </div>
 
           {/* Step 3: Analyze */}
           <div>
             <h3 className="text-lg font-semibold text-gray-200 mb-2 flex items-center">
-                <span className={`flex items-center justify-center w-6 h-6 ${report.trim() ? 'bg-cyan-600' : 'bg-gray-600'} text-white rounded-full text-sm font-bold mr-3 transition-colors`}>3</span>
+                <span className={`flex items-center justify-center w-6 h-6 ${!isAnalyzeButtonDisabled() ? 'bg-cyan-600' : 'bg-gray-600'} text-white rounded-full text-sm font-bold mr-3 transition-colors`}>3</span>
                 触发 AI 分析
             </h3>
             <button
               onClick={handleAnalysis}
-              disabled={isLoading || isVtLoading || !report.trim()}
+              disabled={isAnalyzeButtonDisabled()}
               className="w-full bg-cyan-600 hover:bg-cyan-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-md flex items-center justify-center transition-all duration-300 transform hover:scale-105 disabled:scale-100"
             >
-              {isLoading ? <Loader /> : '使用 Gemini 进行分析'}
+              {isLoading && !analysis ? <Loader /> : `使用 ${getModelName()} 进行分析`}
             </button>
           </div>
         </div>
@@ -201,8 +304,8 @@ const InteractiveDemo: React.FC = () => {
               查看分析结果
           </h3>
           <div className="flex-grow bg-gray-900 border border-gray-600 rounded-md p-4 flex flex-col justify-center min-h-[400px]">
-            {isLoading && <div className="text-center text-gray-400 flex flex-col items-center"><Loader /><span className="mt-2">正在生成分析结果...</span></div>}
-            {error && <div className="text-center text-red-400 p-4 bg-red-900/50 rounded-md">错误: {error}</div>}
+            {isLoading && !analysis && <div className="text-center text-gray-400 flex flex-col items-center"><Loader /><span className="mt-2">正在生成分析结果...</span></div>}
+            {error && <div className="text-center text-red-400 p-4 bg-red-900/50 rounded-md whitespace-pre-wrap"><b>错误:</b> {error}</div>}
             
             {!isLoading && !error && !analysis && (
               <div className="text-center text-gray-500">
@@ -212,7 +315,7 @@ const InteractiveDemo: React.FC = () => {
             )}
 
             {analysis && (
-              <div className="space-y-4 overflow-y-auto max-h-[520px] pr-2">
+              <div className="space-y-4 overflow-y-auto max-h-[620px] pr-2">
                 <CodeBlock language="JSON" code={JSON.stringify(analysis, null, 2)} title="结构化分析" />
                 {yaraRule && <CodeBlock language="YARA" code={yaraRule} title="生成的 YARA 规则" />}
                 <div className="bg-gray-800 p-4 rounded-lg border border-gray-700">
